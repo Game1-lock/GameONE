@@ -6,51 +6,220 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="firebase-config.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { font-family: Arial; text-align: center; padding: 50px; }
-        button { padding: 20px 40px; font-size: 24px; background: blue; color: white; border: none; border-radius: 10px; }
-        #estado { margin-top: 30px; font-size: 20px; }
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        #usuario-info {
+            font-size: 1.2rem;
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 50px;
+            margin-bottom: 30px;
+            width: 100%;
+            max-width: 400px;
+        }
+        #btnBuscar {
+            width: 100%;
+            max-width: 400px;
+            padding: 30px 20px;
+            font-size: 2.5rem;
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: 60px;
+            margin: 20px 0;
+            font-weight: bold;
+            border: 4px solid white;
+            box-shadow: 0 15px 25px rgba(0,0,0,0.4);
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        #btnBuscar:active {
+            transform: scale(0.95);
+            background: #e67e22;
+        }
+        #btnBuscar:disabled {
+            background: #95a5a6;
+            transform: none;
+        }
+        #estado {
+            margin-top: 30px;
+            font-size: 1.8rem;
+            min-height: 80px;
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 50px;
+            width: 100%;
+            max-width: 400px;
+        }
+        .logout {
+            margin-top: 20px;
+            color: #ecf0f1;
+            text-decoration: none;
+            font-size: 1.2rem;
+            padding: 10px;
+        }
     </style>
 </head>
 <body>
     <h1>🏹 LOBBY</h1>
-    <div id="usuario-info"></div>
-    <button onclick="buscarPartida()">🔍 BUSCAR PARTIDA</button>
-    <div id="estado"></div>
+    <div id="usuario-info">Cargando...</div>
+    
+    <button id="btnBuscar">🔍 BUSCAR PARTIDA</button>
+    
+    <div id="estado">Esperando...</div>
+    
+    <a href="#" class="logout" id="logout">Cerrar sesión</a>
 
     <script>
         let usuarioActual = null;
         let buscandoPartida = false;
+        let partidaEncontrada = false;
+        let listenerPartida = null;
 
         // Verificar si el usuario está logueado
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
                 usuarioActual = user;
                 document.getElementById('usuario-info').innerHTML = 
-                    `Bienvenido: <strong>${user.email}</strong> | <a href="#" onclick="logout()">Salir</a>`;
+                    `👤 ${user.email}<br><small>ID: ${user.uid.substring(0,8)}</small>`;
             } else {
-                // No logueado, ir al login
                 window.location.href = 'login.html';
             }
         });
 
+        // Botón de buscar partida
+        document.getElementById('btnBuscar').addEventListener('click', buscarPartida);
+        document.getElementById('btnBuscar').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            buscarPartida();
+        });
+
         function buscarPartida() {
-            if (buscandoPartida) return;
+            if (buscandoPartida || !usuarioActual) return;
             
             buscandoPartida = true;
+            document.getElementById('btnBuscar').disabled = true;
             document.getElementById('estado').innerHTML = "🔍 Buscando oponente...";
             
-            // Aquí vendrá la lógica de matchmaking (siguiente fase)
-            setTimeout(() => {
-                document.getElementById('estado').innerHTML = "⏳ Esperando... (todavía no hay nadie)";
-            }, 2000);
+            // Referencia a la sala de espera en Firebase
+            const waitingRef = firebase.database().ref('matchmaking/espera');
+            
+            // Buscar si ya hay alguien esperando
+            waitingRef.once('value', (snapshot) => {
+                const esperando = snapshot.val();
+                
+                if (esperando && esperando.jugadorId && esperando.jugadorId !== usuarioActual.uid) {
+                    // ¡Hay alguien esperando! Crear partida
+                    crearPartida(esperando.jugadorId, esperando.jugadorEmail, esperando.ref);
+                } else {
+                    // No hay nadie, nos ponemos en espera
+                    esperarOponente();
+                }
+            });
         }
 
-        function logout() {
+        function esperarOponente() {
+            const waitingRef = firebase.database().ref('matchmaking/espera');
+            
+            // Registrarse en espera
+            waitingRef.set({
+                jugadorId: usuarioActual.uid,
+                jugadorEmail: usuarioActual.email,
+                timestamp: Date.now(),
+                ref: waitingRef.toString()
+            });
+
+            document.getElementById('estado').innerHTML = "⏳ Esperando oponente...";
+
+            // Escuchar si alguien más se une
+            listenerPartida = firebase.database().ref('matchmaking/partidas').limitToLast(1).on('child_added', (snapshot) => {
+                const partida = snapshot.val();
+                if (partida.jugador1 === usuarioActual.uid || partida.jugador2 === usuarioActual.uid) {
+                    // Esta partida nos incluye
+                    partidaEncontrada = true;
+                    document.getElementById('estado').innerHTML = "✅ ¡Partida encontrada!";
+                    
+                    // Limpiar y redirigir
+                    limpiarMatchmaking();
+                    
+                    setTimeout(() => {
+                        window.location.href = `juego.html?partida=${snapshot.key}`;
+                    }, 1500);
+                }
+            });
+        }
+
+        function crearPartida(idOponente, emailOponente, refOponente) {
+            // Crear nueva partida
+            const nuevaPartidaRef = firebase.database().ref('matchmaking/partidas').push();
+            
+            nuevaPartidaRef.set({
+                jugador1: usuarioActual.uid,
+                email1: usuarioActual.email,
+                jugador2: idOponente,
+                email2: emailOponente,
+                estado: 'jugando',
+                turno: usuarioActual.uid, // Empieza quien creó la partida
+                inicio: Date.now(),
+                vidas: {
+                    [usuarioActual.uid]: 5,
+                    [idOponente]: 5
+                }
+            });
+
+            // Limpiar la sala de espera
+            firebase.database().ref('matchmaking/espera').remove();
+            
+            document.getElementById('estado').innerHTML = "✅ ¡Oponente encontrado!";
+            
+            // Redirigir a ambos (el listener hará que el otro también sea redirigido)
+            setTimeout(() => {
+                window.location.href = `juego.html?partida=${nuevaPartidaRef.key}`;
+            }, 1500);
+        }
+
+        function limpiarMatchmaking() {
+            if (listenerPartida) {
+                firebase.database().ref('matchmaking/partidas').off('child_added', listenerPartida);
+            }
+            firebase.database().ref('matchmaking/espera').remove();
+        }
+
+        // Cerrar sesión
+        document.getElementById('logout').addEventListener('click', (e) => {
+            e.preventDefault();
+            limpiarMatchmaking();
             firebase.auth().signOut().then(() => {
                 window.location.href = 'login.html';
             });
-        }
+        });
+
+        // Limpiar al salir
+        window.addEventListener('beforeunload', () => {
+            limpiarMatchmaking();
+        });
     </script>
 </body>
 </html>
