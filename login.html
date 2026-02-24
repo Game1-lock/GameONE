@@ -2,8 +2,10 @@
 <html>
 <head>
     <title>Juego de Flechas - Login</title>
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <!-- Tu configuración de Firebase -->
     <script src="firebase-config.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
@@ -11,7 +13,7 @@
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
             user-select: none;
-            touch-action: manipulation; /* IMPORTANTE: evita zoom al tocar */
+            touch-action: manipulation;
         }
         body {
             font-family: Arial, sans-serif;
@@ -29,6 +31,8 @@
         h1 {
             font-size: 3.5rem;
             margin-bottom: 2rem;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
+            font-weight: bold;
         }
         .input-group {
             width: 100%;
@@ -43,6 +47,9 @@
             border-radius: 60px;
             background: white;
             text-align: center;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
         }
         #btnEntrar {
             width: 100%;
@@ -56,8 +63,10 @@
             margin-top: 40px;
             font-weight: bold;
             border: 3px solid white;
-            touch-action: manipulation;
+            box-shadow: 0 15px 25px rgba(0,0,0,0.4);
             cursor: pointer;
+            transition: all 0.1s;
+            touch-action: manipulation;
         }
         #btnEntrar:active {
             transform: scale(0.95);
@@ -66,7 +75,14 @@
         #mensaje {
             margin-top: 30px;
             font-size: 1.5rem;
+            color: #ffeaa7;
+            font-weight: bold;
             min-height: 60px;
+            padding: 10px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 30px;
+            width: 100%;
+            max-width: 400px;
         }
     </style>
 </head>
@@ -81,7 +97,6 @@
         <input type="password" id="password" placeholder="CONTRASEÑA" value="12345">
     </div>
     
-    <!-- IMPORTANTE: Usamos BOTH eventos táctil y mouse -->
     <button id="btnEntrar">👆 ENTRAR CON EL DEDO</button>
     
     <div id="mensaje"></div>
@@ -93,32 +108,68 @@
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             
-            document.getElementById('mensaje').innerText = "⏳ Iniciando...";
+            document.getElementById('mensaje').innerText = "⏳ Iniciando sesión...";
             
             firebase.auth().signInWithEmailAndPassword(email, password)
-                .then(() => {
-                    document.getElementById('mensaje').innerText = "✅ Bienvenido!";
-                    window.location.href = 'lobby.html';
+                .then((userCredential) => {
+                    document.getElementById('mensaje').innerText = "✅ ¡Bienvenido!";
+                    // Redirigir al lobby después de 1 segundo
+                    setTimeout(() => {
+                        window.location.href = 'lobby.html';
+                    }, 1000);
                 })
                 .catch((error) => {
-                    document.getElementById('mensaje').innerText = "❌ " + error.message;
+                    console.error("Error completo:", error);
+                    let mensajeError = "❌ Error: ";
+                    
+                    switch(error.code) {
+                        case 'auth/user-not-found':
+                            mensajeError += "Usuario no existe en Firebase";
+                            break;
+                        case 'auth/wrong-password':
+                            mensajeError += "Contraseña incorrecta";
+                            break;
+                        case 'auth/too-many-requests':
+                            mensajeError += "Demasiados intentos. Espera un momento.";
+                            break;
+                        case 'auth/network-request-failed':
+                            mensajeError += "Problema de internet. Verifica tu conexión.";
+                            break;
+                        case 'auth/invalid-email':
+                            mensajeError += "Email inválido";
+                            break;
+                        case 'auth/email-already-in-use':
+                            mensajeError += "Email ya registrado";
+                            break;
+                        default:
+                            mensajeError += error.message;
+                    }
+                    
+                    document.getElementById('mensaje').innerText = mensajeError;
                 });
         }
 
         // Evento para mouse (PC)
         btn.addEventListener('click', login);
         
-        // Evento para touch (celular) - MÁS IMPORTANTE
+        // Evento para touch (celular)
         btn.addEventListener('touchstart', function(e) {
-            e.preventDefault();  // Evita que el navegador haga zoom o seleccione
+            e.preventDefault();
             login();
         });
         
-        // También los inputs deben responder bien
-        document.addEventListener('touchstart', function(e) {
-            if (e.target.tagName === 'INPUT') return; // Permite escribir en inputs
-            e.preventDefault(); // Evita zoom en todo lo demás
-        }, { passive: false });
+        // También permitir entrar con tecla Enter
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+
+        // Verificar que Firebase se cargó
+        window.onload = function() {
+            console.log("✅ Página cargada");
+            console.log("Firebase disponible:", typeof firebase !== 'undefined');
+        };
     </script>
 </body>
 </html>
