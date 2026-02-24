@@ -6,9 +6,60 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="firebase-config.js"></script>
     <style>
-        body { font-family: Arial; text-align: center; padding: 50px; }
-        input { padding: 10px; margin: 5px; width: 200px; }
-        button { padding: 10px 20px; background: green; color: white; border: none; }
+    * {
+        box-sizing: border-box;
+    }
+    body {
+        font-family: Arial;
+        text-align: center;
+        padding: 20px;
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    h1 {
+        font-size: 48px;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+    input {
+        padding: 18px;
+        margin: 10px 0;
+        width: 90%;
+        max-width: 400px;
+        font-size: 18px;
+        border: none;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.9);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    button {
+        padding: 20px 40px;
+        font-size: 24px;
+        background: #ff6b6b;
+        color: white;
+        border: none;
+        border-radius: 50px;
+        margin-top: 20px;
+        width: 90%;
+        max-width: 400px;
+        font-weight: bold;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        transition: transform 0.1s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    button:active {
+        transform: scale(0.95);
+    }
+    #mensaje {
+        margin-top: 20px;
+        font-size: 18px;
+        color: #ffeaa7;
+    }
     </style>
 </head>
 <body>
@@ -17,7 +68,10 @@
     
     <input type="email" id="email" placeholder="Email" value="chocolatito@juego.com"><br>
     <input type="password" id="password" placeholder="Contraseña" value="12345"><br>
-    <button onclick="login()">Entrar</button>
+    <button onclick="login()" 
+        style="padding: 20px 40px; font-size: 28px; min-height: 80px; width: 80%;">
+    👆 ENTRAR (tócame)
+    </button>
     
     <div id="mensaje" style="color: red; margin-top: 20px;"></div>
 
