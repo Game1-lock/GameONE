@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lobby - Buscar partida</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <style>
+        body { font-family: Arial; text-align: center; padding: 50px; }
+        button { padding: 20px 40px; font-size: 24px; background: blue; color: white; border: none; border-radius: 10px; }
+        #estado { margin-top: 30px; font-size: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🏹 LOBBY</h1>
+    <div id="usuario-info"></div>
+    <button onclick="buscarPartida()">🔍 BUSCAR PARTIDA</button>
+    <div id="estado"></div>
+
+    <script>
+        let usuarioActual = null;
+        let buscandoPartida = false;
+
+        // Verificar si el usuario está logueado
+        firebase.auth().onAuthStateChanged((user) => {
+            if (user) {
+                usuarioActual = user;
+                document.getElementById('usuario-info').innerHTML = 
+                    `Bienvenido: <strong>${user.email}</strong> | <a href="#" onclick="logout()">Salir</a>`;
+            } else {
+                // No logueado, ir al login
+                window.location.href = 'login.html';
+            }
+        });
+
+        function buscarPartida() {
+            if (buscandoPartida) return;
+            
+            buscandoPartida = true;
+            document.getElementById('estado').innerHTML = "🔍 Buscando oponente...";
+            
+            // Aquí vendrá la lógica de matchmaking (siguiente fase)
+            setTimeout(() => {
+                document.getElementById('estado').innerHTML = "⏳ Esperando... (todavía no hay nadie)";
+            }, 2000);
+        }
+
+        function logout() {
+            firebase.auth().signOut().then(() => {
+                window.location.href = 'login.html';
+            });
+        }
+    </script>
+</body>
+</html>
