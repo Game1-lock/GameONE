@@ -5,11 +5,13 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="firebase-config.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         * {
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
             user-select: none;
+            touch-action: manipulation; /* IMPORTANTE: evita zoom al tocar */
         }
         body {
             font-family: Arial, sans-serif;
@@ -27,8 +29,6 @@
         h1 {
             font-size: 3.5rem;
             margin-bottom: 2rem;
-            text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
-            font-weight: bold;
         }
         .input-group {
             width: 100%;
@@ -41,13 +41,10 @@
             font-size: 1.5rem;
             border: none;
             border-radius: 60px;
-            background: rgba(255,255,255,0.95);
-            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+            background: white;
             text-align: center;
-            font-weight: bold;
-            color: #333;
         }
-        button {
+        #btnEntrar {
             width: 100%;
             max-width: 400px;
             padding: 25px 20px;
@@ -58,28 +55,18 @@
             border-radius: 60px;
             margin-top: 40px;
             font-weight: bold;
-            box-shadow: 0 15px 25px rgba(0,0,0,0.4);
-            cursor: pointer;
-            transition: all 0.1s;
             border: 3px solid white;
-            letter-spacing: 2px;
+            touch-action: manipulation;
+            cursor: pointer;
         }
-        button:active {
-            transform: scale(0.97);
+        #btnEntrar:active {
+            transform: scale(0.95);
             background: #ff5252;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.4);
         }
         #mensaje {
             margin-top: 30px;
             font-size: 1.5rem;
-            color: #ffeaa7;
-            font-weight: bold;
             min-height: 60px;
-        }
-        /* Ocultar spinner en inputs numéricos */
-        input[type="text"], input[type="email"], input[type="password"] {
-            -webkit-appearance: none;
-            appearance: none;
         }
     </style>
 </head>
@@ -94,46 +81,44 @@
         <input type="password" id="password" placeholder="CONTRASEÑA" value="12345">
     </div>
     
-    <button id="btnEntrar" ontouchstart="login()" onclick="login()">
-        👆 ENTRAR
-    </button>
+    <!-- IMPORTANTE: Usamos BOTH eventos táctil y mouse -->
+    <button id="btnEntrar">👆 ENTRAR CON EL DEDO</button>
     
     <div id="mensaje"></div>
 
     <script>
+        const btn = document.getElementById('btnEntrar');
+        
         function login() {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             
-            document.getElementById('mensaje').innerText = "⏳ Iniciando sesión...";
+            document.getElementById('mensaje').innerText = "⏳ Iniciando...";
             
             firebase.auth().signInWithEmailAndPassword(email, password)
-                .then((userCredential) => {
-                    document.getElementById('mensaje').innerText = "✅ ¡Bienvenido!";
+                .then(() => {
+                    document.getElementById('mensaje').innerText = "✅ Bienvenido!";
                     window.location.href = 'lobby.html';
                 })
                 .catch((error) => {
-                    let mensajeError = "❌ Error: ";
-                    switch(error.code) {
-                        case 'auth/user-not-found':
-                            mensajeError += "Usuario no encontrado";
-                            break;
-                        case 'auth/wrong-password':
-                            mensajeError += "Contraseña incorrecta";
-                            break;
-                        default:
-                            mensajeError += error.message;
-                    }
-                    document.getElementById('mensaje').innerText = mensajeError;
+                    document.getElementById('mensaje').innerText = "❌ " + error.message;
                 });
         }
 
-        // También permitir entrar con tecla Enter
-        document.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                login();
-            }
+        // Evento para mouse (PC)
+        btn.addEventListener('click', login);
+        
+        // Evento para touch (celular) - MÁS IMPORTANTE
+        btn.addEventListener('touchstart', function(e) {
+            e.preventDefault();  // Evita que el navegador haga zoom o seleccione
+            login();
         });
+        
+        // También los inputs deben responder bien
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'INPUT') return; // Permite escribir en inputs
+            e.preventDefault(); // Evita zoom en todo lo demás
+        }, { passive: false });
     </script>
 </body>
 </html>
