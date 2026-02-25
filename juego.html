@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Juego Flechitas - WebRTC</title>
+    <title>Juego Flechitas - Optimizado</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="firebase-config.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
+        /* MISMOS ESTILOS DE ANTES */
         * {
             box-sizing: border-box;
             user-select: none;
@@ -105,6 +105,7 @@
             z-index: 20;
             border: 3px solid white;
             opacity: 0.7;
+            transition: left 0.05s;
         }
         .flecha {
             position: absolute;
@@ -174,22 +175,12 @@
             background: #7f8c8d;
             opacity: 0.5;
         }
-        #vidas {
-            color: #e74c3c;
-            font-weight: bold;
-        }
         #mensaje {
             text-align: center;
             color: white;
             margin: 15px 0;
             font-size: 1.3rem;
             min-height: 30px;
-        }
-        #estado-conexion {
-            text-align: center;
-            color: #f39c12;
-            font-size: 1rem;
-            margin-top: 5px;
         }
     </style>
 </head>
@@ -226,7 +217,6 @@
         </div>
         
         <div id="mensaje"></div>
-        <div id="estado-conexion">🔌 Conectando...</div>
     </div>
 
     <script>
@@ -249,11 +239,10 @@
         const MAX_FLECHAS = 5;
         const TIEMPO_RECARGA = 3000;
         
-        // WebRTC
-        let peer = null;
-        let conn = null;
-        let miPeerId = null;
-        
+        // Control de envío (para no saturar)
+        let ultimoEnvio = 0;
+        const INTERVALO_ENVIO = 50; // ms
+
         // ========== INICIALIZACIÓN ==========
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
@@ -268,6 +257,7 @@
         function iniciarJuego() {
             partidaRef = firebase.database().ref('partidas/' + partidaId);
             
+            // Obtener datos de la partida
             partidaRef.once('value', (snapshot) => {
                 const partida = snapshot.val();
                 if (partida.j1 === miId) {
@@ -276,109 +266,52 @@
                     rivalId = partida.j1;
                 }
                 
+                // Inicializar vidas
                 misVidas = partida.vidas[miId] || 5;
                 rivalVidas = partida.vidas[rivalId] || 5;
                 actualizarVidas();
                 
-                // Iniciar WebRTC
-                iniciarWebRTC();
-                
                 // Iniciar sistemas
                 iniciarRecarga();
                 iniciarObstaculos();
+                escucharRival();
             });
         }
 
-        // ========== WEBRTC ==========
-        function iniciarWebRTC() {
-            document.getElementById('estado-conexion').innerHTML = "🔌 Iniciando WebRTC...";
-            
-            // Crear peer con servidores STUN gratis
-            peer = new Peer({
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
-                    ]
+        // ========== ESCUCHAR AL RIVAL (OPTIMIZADO) ==========
+        function escucharRival() {
+            // Escuchar posición del rival
+            partidaRef.child('posicion').on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data && data.jugador === rivalId) {
+                    document.getElementById('rival-marcador').style.left = data.posicion + '%';
                 }
             });
-            
-            peer.on('open', (id) => {
-                miPeerId = id;
-                document.getElementById('estado-conexion').innerHTML = "📡 Conectando con rival...";
-                
-                // Guardar mi Peer ID en Firebase
-                partidaRef.child('webrtc/' + miId).set(id);
-                
-                // Esperar Peer ID del rival
-                partidaRef.child('webrtc/' + rivalId).on('value', (snapshot) => {
-                    const rivalPeerId = snapshot.val();
-                    if (rivalPeerId && !conn) {
-                        // Conectar con el rival
-                        conn = peer.connect(rivalPeerId);
-                        
-                        conn.on('open', () => {
-                            document.getElementById('estado-conexion').innerHTML = "✅ Conexión directa!";
-                            
-                            // Enviar mi posición inicial
-                            conn.send({
-                                tipo: 'movimiento',
-                                posicion: miPosicion
-                            });
-                        });
-                        
-                        conn.on('data', recibirDatosWebRTC);
-                        
-                        conn.on('error', (err) => {
-                            document.getElementById('estado-conexion').innerHTML = "⚠️ Error en conexión";
-                        });
-                    }
-                });
+
+            // Escuchar disparos
+            partidaRef.child('disparos').on('child_added', (snapshot) => {
+                const disparo = snapshot.val();
+                if (disparo.jugador === rivalId) {
+                    crearFlechaEnemiga(disparo.posicion, disparo.id);
+                }
             });
-            
-            peer.on('connection', (incomingConn) => {
-                conn = incomingConn;
-                document.getElementById('estado-conexion').innerHTML = "✅ Conexión directa!";
-                
-                conn.on('data', recibirDatosWebRTC);
-                
-                // Enviar mi posición
-                conn.send({
-                    tipo: 'movimiento',
-                    posicion: miPosicion
-                });
-            });
-            
-            peer.on('error', (err) => {
-                document.getElementById('estado-conexion').innerHTML = "❌ Error WebRTC, usando Firebase";
-                // Fallback a Firebase si WebRTC falla
-                usarFirebaseFallback();
+
+            // Escuchar daño
+            partidaRef.child('danio').on('child_added', (snapshot) => {
+                const d = snapshot.val();
+                if (d.recibe === miId) {
+                    misVidas = Math.max(0, misVidas - 1);
+                    actualizarVidas();
+                    if (misVidas <= 0) finDelJuego('💀 PERDISTE 💀');
+                } else if (d.recibe === rivalId) {
+                    rivalVidas = Math.max(0, rivalVidas - 1);
+                    actualizarVidas();
+                    if (rivalVidas <= 0) finDelJuego('🏆 ¡GANASTE! 🏆');
+                }
             });
         }
 
-        function recibirDatosWebRTC(data) {
-            if (!juegoActivo) return;
-            
-            switch(data.tipo) {
-                case 'movimiento':
-                    document.getElementById('rival-marcador').style.left = data.posicion + '%';
-                    break;
-                    
-                case 'disparo':
-                    crearFlechaEnemiga(data.posicion, data.id);
-                    break;
-                    
-                case 'danio':
-                    if (data.recibe === miId) {
-                        misVidas = Math.max(0, misVidas - 1);
-                        actualizarVidas();
-                        if (misVidas <= 0) finDelJuego('💀 PERDISTE 💀');
-                    }
-                    break;
-            }
-        }
-
-        // ========== MOVIMIENTO ==========
+        // ========== MOVIMIENTO (OPTIMIZADO) ==========
         document.getElementById('btnIzq').addEventListener('click', moverIzq);
         document.getElementById('btnIzq').addEventListener('touchstart', (e) => {
             e.preventDefault();
@@ -406,12 +339,15 @@
         function actualizarPosicion() {
             document.getElementById('mi-jugador').style.left = miPosicion + '%';
             
-            // Enviar por WebRTC
-            if (conn && conn.open) {
-                conn.send({
-                    tipo: 'movimiento',
-                    posicion: miPosicion
+            // Enviar a Firebase con throttling
+            const ahora = Date.now();
+            if (ahora - ultimoEnvio > INTERVALO_ENVIO) {
+                partidaRef.child('posicion').set({
+                    jugador: miId,
+                    posicion: miPosicion,
+                    timestamp: ahora
                 });
+                ultimoEnvio = ahora;
             }
         }
 
@@ -437,14 +373,13 @@
             // Crear flecha visual
             crearFlechaPropia(miPosicion, flechaId);
             
-            // Enviar por WebRTC
-            if (conn && conn.open) {
-                conn.send({
-                    tipo: 'disparo',
-                    posicion: miPosicion,
-                    id: flechaId
-                });
-            }
+            // Notificar a Firebase
+            partidaRef.child('disparos').push({
+                jugador: miId,
+                posicion: miPosicion,
+                id: flechaId,
+                timestamp: Date.now()
+            });
         }
 
         function crearFlechaPropia(posicion, id) {
@@ -461,14 +396,12 @@
                 flecha.style.bottom = y + 'px';
                 
                 // Si llega a zona rival
-                if (y > 250 && y < 300) {
-                    // Notificar posible daño (simplificado)
-                    if (conn && conn.open) {
-                        conn.send({
-                            tipo: 'danio',
-                            recibe: rivalId
-                        });
-                    }
+                if (y > 250 && y < 260) {
+                    partidaRef.child('danio').push({
+                        recibe: rivalId,
+                        de: miId,
+                        timestamp: Date.now()
+                    });
                 }
                 
                 if (y > 500) {
@@ -579,24 +512,6 @@
             });
         }
 
-        // ========== FALLBACK ==========
-        function usarFirebaseFallback() {
-            // Escuchar movimientos por Firebase si WebRTC falla
-            partidaRef.child('posicion').on('value', (snapshot) => {
-                const pos = snapshot.val();
-                if (pos && pos.jugador === rivalId) {
-                    document.getElementById('rival-marcador').style.left = pos.posicion + '%';
-                }
-            });
-            
-            partidaRef.child('disparos').on('child_added', (snapshot) => {
-                const disparo = snapshot.val();
-                if (disparo.jugador === rivalId) {
-                    crearFlechaEnemiga(disparo.posicion, disparo.id);
-                }
-            });
-        }
-
         // ========== UTILIDADES ==========
         function actualizarVidas() {
             document.getElementById('mis-vidas').textContent = misVidas;
@@ -618,7 +533,7 @@
             }, 3000);
         }
 
-        // Inicializar posición
+        // Posición inicial
         window.onload = () => {
             document.getElementById('mi-jugador').style.left = '50%';
             document.getElementById('rival-marcador').style.left = '50%';
