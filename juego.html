@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Juego - Flechitas</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: #2c3e50;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial;
+        }
+        #game-container {
+            width: 100%;
+            max-width: 400px;
+            background: #34495e;
+            border-radius: 30px;
+            padding: 20px;
+            box-shadow: 0 20px 30px rgba(0,0,0,0.5);
+        }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            color: white;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            background: #2c3e50;
+            padding: 15px;
+            border-radius: 50px;
+        }
+        #campo {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            background: #27ae60;
+            border-radius: 30px;
+            overflow: hidden;
+            border: 4px solid #f39c12;
+            margin-bottom: 20px;
+        }
+        #jugador {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 80px;
+            background: #f1c40f;
+            border-radius: 30px 30px 10px 10px;
+            transition: left 0.1s;
+            z-index: 10;
+        }
+        .flecha {
+            position: absolute;
+            width: 10px;
+            height: 25px;
+            background: #e67e22;
+            border-radius: 5px;
+        }
+        .obstaculo {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: #c0392b;
+            border-radius: 10px;
+        }
+        #controles {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .control-btn {
+            flex: 1;
+            padding: 20px;
+            font-size: 1.5rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-weight: bold;
+            box-shadow: 0 5px 0 #2980b9;
+            touch-action: manipulation;
+        }
+        .control-btn:active {
+            transform: translateY(5px);
+            box-shadow: none;
+        }
+        #vidas {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        #mensaje {
+            text-align: center;
+            color: white;
+            margin-top: 20px;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="header">
+            <span>🏹 <span id="mis-vidas">5</span></span>
+            <span>⚔️</span>
+            <span>🎯 <span id="rival-vidas">5</span></span>
+        </div>
+        
+        <div id="campo">
+            <div id="jugador"></div>
+            <!-- Aquí van flechas y obstáculos -->
+        </div>
+        
+        <div id="controles">
+            <button class="control-btn" id="btnIzq">⬅️</button>
+            <button class="control-btn" id="btnDisparar">🏹</button>
+            <button class="control-btn" id="btnDer">➡️</button>
+        </div>
+        
+        <div id="mensaje"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const partidaId = urlParams.get('partida');
+        let usuarioActual = null;
+        let miId = null;
+        let rivalId = null;
+        let miPosicion = 50; // % de la izquierda
+        let partidaRef = null;
+        let juegoActivo = true;
+        let misVidas = 5;
+        let rivalVidas = 5;
+
+        firebase.auth().onAuthStateChanged((user) => {
+            if (user) {
+                usuarioActual = user;
+                miId = user.uid;
+                iniciarJuego();
+            } else {
+                window.location.href = 'login.html';
+            }
+        });
+
+        function iniciarJuego() {
+            partidaRef = firebase.database().ref('partidas/' + partidaId);
+            
+            // Obtener datos de la partida
+            partidaRef.once('value', (snapshot) => {
+                const partida = snapshot.val();
+                if (partida.j1 === miId) {
+                    rivalId = partida.j2;
+                } else {
+                    rivalId = partida.j1;
+                }
+                
+                // Inicializar vidas
+                misVidas = partida.vidas[miId] || 5;
+                rivalVidas = partida.vidas[rivalId] || 5;
+                actualizarVidas();
+            });
+
+            // Escuchar movimientos del rival
+            partidaRef.child('movimientos').on('child_added', (snapshot) => {
+                const mov = snapshot.val();
+                if (mov.jugador === rivalId) {
+                    if (mov.tipo === 'posicion') {
+                        // Mover representación del rival (por ahora no hay)
+                    } else if (mov.tipo === 'flecha') {
+                        crearFlechaEnemiga(mov.posicion);
+                    }
+                }
+            });
+
+            // Escuchar daño
+            partidaRef.child('danio').on('child_added', (snapshot) => {
+                const d = snapshot.val();
+                if (d.recibe === miId) {
+                    misVidas--;
+                    actualizarVidas();
+                    if (misVidas <= 0) {
+                        finDelJuego('Perdiste 😢');
+                    }
+                } else if (d.recibe === rivalId) {
+                    rivalVidas--;
+                    actualizarVidas();
+                    if (rivalVidas <= 0) {
+                        finDelJuego('¡Ganaste! 🎉');
+                    }
+                }
+            });
+        }
+
+        // Movimiento del jugador
+        document.getElementById('btnIzq').addEventListener('click', moverIzq);
+        document.getElementById('btnIzq').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            moverIzq();
+        });
+
+        document.getElementById('btnDer').addEventListener('click', moverDer);
+        document.getElementById('btnDer').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            moverDer();
+        });
+
+        document.getElementById('btnDisparar').addEventListener('click', disparar);
+        document.getElementById('btnDisparar').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            disparar();
+        });
+
+        function moverIzq() {
+            if (!juegoActivo) return;
+            miPosicion = Math.max(5, miPosicion - 5);
+            document.getElementById('jugador').style.left = miPosicion + '%';
+            
+            // Notificar movimiento al rival
+            partidaRef.child('movimientos').push({
+                jugador: miId,
+                tipo: 'posicion',
+                posicion: miPosicion,
+                timestamp: Date.now()
+            });
+        }
+
+        function moverDer() {
+            if (!juegoActivo) return;
+            miPosicion = Math.min(95, miPosicion + 5);
+            document.getElementById('jugador').style.left = miPosicion + '%';
+            
+            partidaRef.child('movimientos').push({
+                jugador: miId,
+                tipo: 'posicion',
+                posicion: miPosicion,
+                timestamp: Date.now()
+            });
+        }
+
+        function disparar() {
+            if (!juegoActivo) return;
+            
+            // Crear flecha visual
+            const flecha = document.createElement('div');
+            flecha.className = 'flecha';
+            flecha.style.left = miPosicion + '%';
+            flecha.style.bottom = '100px';
+            document.getElementById('campo').appendChild(flecha);
+            
+            // Animación de la flecha
+            let y = 100;
+            const intervalo = setInterval(() => {
+                y += 10;
+                flecha.style.bottom = y + 'px';
+                if (y > 400) {
+                    clearInterval(intervalo);
+                    flecha.remove();
+                }
+            }, 50);
+
+            // Notificar disparo al rival
+            partidaRef.child('movimientos').push({
+                jugador: miId,
+                tipo: 'flecha',
+                posicion: miPosicion,
+                timestamp: Date.now()
+            });
+        }
+
+        function crearFlechaEnemiga(posicion) {
+            const flecha = document.createElement('div');
+            flecha.className = 'flecha';
+            flecha.style.left = posicion + '%';
+            flecha.style.bottom = '100px';
+            flecha.style.background = '#e74c3c';
+            document.getElementById('campo').appendChild(flecha);
+            
+            let y = 100;
+            const intervalo = setInterval(() => {
+                y += 10;
+                flecha.style.bottom = y + 'px';
+                if (y > 400) {
+                    clearInterval(intervalo);
+                    flecha.remove();
+                }
+            }, 50);
+        }
+
+        function actualizarVidas() {
+            document.getElementById('mis-vidas').textContent = misVidas;
+            document.getElementById('rival-vidas').textContent = rivalVidas;
+        }
+
+        function finDelJuego(mensaje) {
+            juegoActivo = false;
+            document.getElementById('mensaje').textContent = mensaje;
+            setTimeout(() => {
+                window.location.href = 'lobby.html';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
