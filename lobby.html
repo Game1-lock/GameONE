@@ -95,10 +95,10 @@
     <script>
         let usuarioActual = null;
         let buscandoPartida = false;
-        let partidaEncontrada = false;
         let listenerPartida = null;
+        let listenerEspera = null;
+        let miReferenciaEspera = null;
 
-        // Verificar si el usuario está logueado
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
                 usuarioActual = user;
@@ -109,7 +109,6 @@
             }
         });
 
-        // Botón de buscar partida
         document.getElementById('btnBuscar').addEventListener('click', buscarPartida);
         document.getElementById('btnBuscar').addEventListener('touchstart', (e) => {
             e.preventDefault();
@@ -123,45 +122,45 @@
             document.getElementById('btnBuscar').disabled = true;
             document.getElementById('estado').innerHTML = "🔍 Buscando oponente...";
             
-            // Referencia a la sala de espera en Firebase
             const waitingRef = firebase.database().ref('matchmaking/espera');
             
-            // Buscar si ya hay alguien esperando
+            // Verificar si ya hay alguien esperando
             waitingRef.once('value', (snapshot) => {
                 const esperando = snapshot.val();
                 
                 if (esperando && esperando.jugadorId && esperando.jugadorId !== usuarioActual.uid) {
-                    // ¡Hay alguien esperando! Crear partida
-                    crearPartida(esperando.jugadorId, esperando.jugadorEmail, esperando.ref);
+                    // Hay un oponente esperando, crear partida
+                    crearPartida(esperando);
                 } else {
                     // No hay nadie, nos ponemos en espera
-                    esperarOponente();
+                    ponerEnEspera();
                 }
             });
         }
 
-        function esperarOponente() {
+        function ponerEnEspera() {
             const waitingRef = firebase.database().ref('matchmaking/espera');
             
-            // Registrarse en espera
+            // Guardar nuestra referencia para limpiarla después
+            miReferenciaEspera = waitingRef;
+            
+            // Nos registramos en espera
             waitingRef.set({
                 jugadorId: usuarioActual.uid,
                 jugadorEmail: usuarioActual.email,
-                timestamp: Date.now(),
-                ref: waitingRef.toString()
+                timestamp: Date.now()
             });
 
             document.getElementById('estado').innerHTML = "⏳ Esperando oponente...";
 
-            // Escuchar si alguien más se une
+            // Escuchar si alguien más se une (crea una partida)
             listenerPartida = firebase.database().ref('matchmaking/partidas').limitToLast(1).on('child_added', (snapshot) => {
                 const partida = snapshot.val();
-                if (partida.jugador1 === usuarioActual.uid || partida.jugador2 === usuarioActual.uid) {
+                if (partida && (partida.jugador1 === usuarioActual.uid || partida.jugador2 === usuarioActual.uid)) {
                     // Esta partida nos incluye
-                    partidaEncontrada = true;
                     document.getElementById('estado').innerHTML = "✅ ¡Partida encontrada!";
                     
-                    // Limpiar y redirigir
+                    // Limpiar todo
                     limpiarMatchmaking();
                     
                     setTimeout(() => {
@@ -171,32 +170,33 @@
             });
         }
 
-        function crearPartida(idOponente, emailOponente, refOponente) {
+        function crearPartida(oponente) {
             // Crear nueva partida
             const nuevaPartidaRef = firebase.database().ref('matchmaking/partidas').push();
+            const partidaId = nuevaPartidaRef.key;
             
             nuevaPartidaRef.set({
                 jugador1: usuarioActual.uid,
                 email1: usuarioActual.email,
-                jugador2: idOponente,
-                email2: emailOponente,
+                jugador2: oponente.jugadorId,
+                email2: oponente.jugadorEmail,
                 estado: 'jugando',
-                turno: usuarioActual.uid, // Empieza quien creó la partida
+                turno: usuarioActual.uid,
                 inicio: Date.now(),
                 vidas: {
                     [usuarioActual.uid]: 5,
-                    [idOponente]: 5
+                    [oponente.jugadorId]: 5
                 }
             });
 
-            // Limpiar la sala de espera
+            // Limpiar la sala de espera (¡esto es clave!)
             firebase.database().ref('matchmaking/espera').remove();
             
             document.getElementById('estado').innerHTML = "✅ ¡Oponente encontrado!";
             
-            // Redirigir a ambos (el listener hará que el otro también sea redirigido)
+            // Redirigir
             setTimeout(() => {
-                window.location.href = `juego.html?partida=${nuevaPartidaRef.key}`;
+                window.location.href = `juego.html?partida=${partidaId}`;
             }, 1500);
         }
 
@@ -204,10 +204,12 @@
             if (listenerPartida) {
                 firebase.database().ref('matchmaking/partidas').off('child_added', listenerPartida);
             }
-            firebase.database().ref('matchmaking/espera').remove();
+            // Limpiar nuestra entrada en espera si existe
+            if (miReferenciaEspera) {
+                miReferenciaEspera.remove();
+            }
         }
 
-        // Cerrar sesión
         document.getElementById('logout').addEventListener('click', (e) => {
             e.preventDefault();
             limpiarMatchmaking();
@@ -216,7 +218,6 @@
             });
         });
 
-        // Limpiar al salir
         window.addEventListener('beforeunload', () => {
             limpiarMatchmaking();
         });
