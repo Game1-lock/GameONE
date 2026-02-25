@@ -8,211 +8,100 @@
     <script src="firebase-config.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
-        }
         body {
-            font-family: Arial, sans-serif;
+            font-family: Arial;
             text-align: center;
             padding: 20px;
-            margin: 0;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
+            background: linear-gradient(135deg, #43cea2, #185a9d);
             color: white;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
         }
-        h1 {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-        #usuario-info {
-            font-size: 1.2rem;
-            background: rgba(0,0,0,0.3);
-            padding: 15px;
-            border-radius: 50px;
-            margin-bottom: 30px;
-            width: 100%;
+        button {
+            width: 90%;
             max-width: 400px;
-        }
-        #btnBuscar {
-            width: 100%;
-            max-width: 400px;
-            padding: 30px 20px;
-            font-size: 2.5rem;
+            padding: 30px;
+            font-size: 2rem;
             background: #f39c12;
-            color: white;
             border: none;
             border-radius: 60px;
-            margin: 20px 0;
+            color: white;
             font-weight: bold;
-            border: 4px solid white;
-            box-shadow: 0 15px 25px rgba(0,0,0,0.4);
-            cursor: pointer;
-            transition: all 0.1s;
-        }
-        #btnBuscar:active {
-            transform: scale(0.95);
-            background: #e67e22;
-        }
-        #btnBuscar:disabled {
-            background: #95a5a6;
-            transform: none;
+            margin: 20px;
         }
         #estado {
-            margin-top: 30px;
-            font-size: 1.8rem;
-            min-height: 80px;
+            font-size: 1.5rem;
             background: rgba(0,0,0,0.3);
             padding: 20px;
-            border-radius: 50px;
-            width: 100%;
+            border-radius: 30px;
+            width: 90%;
             max-width: 400px;
-        }
-        .logout {
-            margin-top: 20px;
-            color: #ecf0f1;
-            text-decoration: none;
-            font-size: 1.2rem;
-            padding: 10px;
         }
     </style>
 </head>
 <body>
     <h1>🏹 LOBBY</h1>
-    <div id="usuario-info">Cargando...</div>
-    
+    <div id="usuario"></div>
     <button id="btnBuscar">🔍 BUSCAR PARTIDA</button>
-    
     <div id="estado">Esperando...</div>
-    
-    <a href="#" class="logout" id="logout">Cerrar sesión</a>
 
     <script>
         let usuarioActual = null;
-        let buscandoPartida = false;
+        const db = firebase.database();
 
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
                 usuarioActual = user;
-                document.getElementById('usuario-info').innerHTML = 
-                    `👤 ${user.email}<br><small>ID: ${user.uid.substring(0,8)}</small>`;
-                
-                // Escuchar partidas cada 2 segundos
-                setInterval(buscarPartidasActivas, 2000);
+                document.getElementById('usuario').innerHTML = `👤 ${user.email}`;
             } else {
                 window.location.href = 'login.html';
             }
         });
 
-        document.getElementById('btnBuscar').addEventListener('click', buscarPartida);
-        document.getElementById('btnBuscar').addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            buscarPartida();
-        });
+        document.getElementById('btnBuscar').onclick = buscarPartida;
 
         function buscarPartida() {
-            if (buscandoPartida || !usuarioActual) return;
+            document.getElementById('estado').innerHTML = "🔍 Buscando...";
             
-            buscandoPartida = true;
-            document.getElementById('btnBuscar').disabled = true;
-            document.getElementById('estado').innerHTML = "🔍 Buscando oponente...";
-            
-            // Buscar si hay partidas disponibles
-            firebase.database().ref('partidas_disponibles').once('value', (snapshot) => {
-                const partidas = snapshot.val();
-                let partidaEncontrada = false;
+            // 1. Ver si hay alguien esperando
+            db.ref('espera').once('value', (snapshot) => {
+                let espera = snapshot.val();
                 
-                if (partidas) {
-                    // Buscar una partida que no sea nuestra
-                    for (let id in partidas) {
-                        if (partidas[id].creador !== usuarioActual.uid) {
-                            // Unirse a esta partida
-                            unirseAPartida(id, partidas[id].creador);
-                            partidaEncontrada = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!partidaEncontrada) {
-                    // Crear nueva partida
-                    crearPartida();
-                }
-            });
-        }
-
-        function crearPartida() {
-            const nuevaPartidaRef = firebase.database().ref('partidas_disponibles').push();
-            const partidaId = nuevaPartidaRef.key;
-            
-            nuevaPartidaRef.set({
-                creador: usuarioActual.uid,
-                timestamp: Date.now()
-            });
-
-            document.getElementById('estado').innerHTML = "⏳ Esperando oponente...";
-
-            // Esperar a que alguien se una
-            const esperarListener = firebase.database().ref('partidas_activas/' + partidaId).on('value', (snapshot) => {
-                if (snapshot.exists()) {
-                    // Alguien se unió, empezar juego
-                    document.getElementById('estado').innerHTML = "✅ ¡Oponente encontrado!";
-                    firebase.database().ref('partidas_disponibles/' + partidaId).remove();
+                if (espera && espera !== usuarioActual.uid) {
+                    // Hay alguien esperando, CREAR PARTIDA
+                    let partidaId = Date.now() + ""; // ID único simple
                     
-                    setTimeout(() => {
-                        window.location.href = `juego.html?partida=${partidaId}`;
-                    }, 1500);
-                }
-            });
-        }
-
-        function unirseAPartida(partidaId, creadorId) {
-            firebase.database().ref('partidas_activas/' + partidaId).set({
-                jugador1: creadorId,
-                jugador2: usuarioActual.uid,
-                estado: 'jugando',
-                vidas: {
-                    [creadorId]: 5,
-                    [usuarioActual.uid]: 5
-                }
-            });
-
-            document.getElementById('estado').innerHTML = "✅ ¡Partida encontrada!";
-            
-            setTimeout(() => {
-                window.location.href = `juego.html?partida=${partidaId}`;
-            }, 1500);
-        }
-
-        function buscarPartidasActivas() {
-            if (!usuarioActual) return;
-            
-            // Verificar si tenemos una partida activa
-            firebase.database().ref('partidas_activas').once('value', (snapshot) => {
-                const partidas = snapshot.val();
-                if (partidas) {
-                    for (let id in partidas) {
-                        if (partidas[id].jugador1 === usuarioActual.uid || partidas[id].jugador2 === usuarioActual.uid) {
-                            // Ya estamos en una partida, redirigir
-                            window.location.href = `juego.html?partida=${id}`;
-                            break;
+                    db.ref('partidas/' + partidaId).set({
+                        j1: espera,
+                        j2: usuarioActual.uid,
+                        turno: espera,
+                        vidas: { [espera]: 5, [usuarioActual.uid]: 5 }
+                    });
+                    
+                    db.ref('espera').remove(); // Limpiar espera
+                    
+                    document.getElementById('estado').innerHTML = "✅ Partida creada!";
+                    window.location.href = 'juego.html?partida=' + partidaId;
+                    
+                } else {
+                    // No hay nadie, me pongo en espera
+                    db.ref('espera').set(usuarioActual.uid);
+                    document.getElementById('estado').innerHTML = "⏳ Esperando oponente...";
+                    
+                    // Escuchar si alguien crea una partida conmigo
+                    db.ref('partidas').on('child_added', (snap) => {
+                        let p = snap.val();
+                        if (p.j1 === usuarioActual.uid || p.j2 === usuarioActual.uid) {
+                            document.getElementById('estado').innerHTML = "✅ Encontrado!";
+                            window.location.href = 'juego.html?partida=' + snap.key;
                         }
-                    }
+                    });
                 }
             });
         }
-
-        document.getElementById('logout').addEventListener('click', (e) => {
-            e.preventDefault();
-            firebase.auth().signOut().then(() => {
-                window.location.href = 'login.html';
-            });
-        });
     </script>
 </body>
 </html>
