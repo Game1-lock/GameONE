@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Juego - Flechitas</title>
+    <title>Juego Flechitas - WebRTC</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="firebase-config.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
@@ -52,7 +53,6 @@
             border: 4px solid #f39c12;
             margin-bottom: 15px;
         }
-        /* Línea divisoria central */
         #campo::after {
             content: '';
             position: absolute;
@@ -64,7 +64,6 @@
             transform: translateY(-50%);
             z-index: 5;
         }
-        /* Mi zona (abajo) */
         #mi-zona {
             position: absolute;
             bottom: 0;
@@ -74,7 +73,6 @@
             background: rgba(46, 204, 113, 0.2);
             z-index: 1;
         }
-        /* Zona rival (arriba) */
         #rival-zona {
             position: absolute;
             top: 0;
@@ -92,11 +90,10 @@
             background: #f1c40f;
             border-radius: 25px 25px 10px 10px;
             transform: translateX(-50%);
-            transition: left 0.1s;
+            transition: left 0.05s;
             z-index: 20;
             border: 3px solid white;
         }
-        /* El rival NO se dibuja, solo lo representamos con un marcador */
         #rival-marcador {
             position: absolute;
             top: 20px;
@@ -188,6 +185,12 @@
             font-size: 1.3rem;
             min-height: 30px;
         }
+        #estado-conexion {
+            text-align: center;
+            color: #f39c12;
+            font-size: 1rem;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -203,7 +206,6 @@
             <div id="rival-zona"></div>
             <div id="mi-jugador"></div>
             <div id="rival-marcador"></div>
-            <!-- Aquí van flechas y obstáculos -->
         </div>
         
         <div id="controles">
@@ -224,6 +226,7 @@
         </div>
         
         <div id="mensaje"></div>
+        <div id="estado-conexion">🔌 Conectando...</div>
     </div>
 
     <script>
@@ -239,16 +242,17 @@
         let juegoActivo = true;
         let misVidas = 5;
         let rivalVidas = 5;
-        let miPosicion = 50; // % desde izquierda
+        let miPosicion = 50;
         
-        // Sistema de flechas
+        // Flechas
         let flechasDisponibles = 5;
         const MAX_FLECHAS = 5;
-        const TIEMPO_RECARGA = 3000; // 3 segundos
+        const TIEMPO_RECARGA = 3000;
         
-        // Obstáculos
-        let obstaculos = [];
-        const MAX_OBSTACULOS = 5;
+        // WebRTC
+        let peer = null;
+        let conn = null;
+        let miPeerId = null;
         
         // ========== INICIALIZACIÓN ==========
         firebase.auth().onAuthStateChanged((user) => {
@@ -264,7 +268,6 @@
         function iniciarJuego() {
             partidaRef = firebase.database().ref('partidas/' + partidaId);
             
-            // Obtener datos de la partida
             partidaRef.once('value', (snapshot) => {
                 const partida = snapshot.val();
                 if (partida.j1 === miId) {
@@ -273,49 +276,106 @@
                     rivalId = partida.j1;
                 }
                 
-                // Inicializar vidas
                 misVidas = partida.vidas[miId] || 5;
                 rivalVidas = partida.vidas[rivalId] || 5;
                 actualizarVidas();
+                
+                // Iniciar WebRTC
+                iniciarWebRTC();
                 
                 // Iniciar sistemas
                 iniciarRecarga();
                 iniciarObstaculos();
             });
+        }
 
-            // Escuchar disparos enemigos
-            partidaRef.child('disparos').on('child_added', (snapshot) => {
-                const disparo = snapshot.val();
-                if (disparo.jugador === rivalId) {
-                    crearFlechaEnemiga(disparo.posicion, disparo.id);
+        // ========== WEBRTC ==========
+        function iniciarWebRTC() {
+            document.getElementById('estado-conexion').innerHTML = "🔌 Iniciando WebRTC...";
+            
+            // Crear peer con servidores STUN gratis
+            peer = new Peer({
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
                 }
             });
-
-            // Escuchar daño
-            partidaRef.child('danio').on('child_added', (snapshot) => {
-                const d = snapshot.val();
-                if (d.recibe === miId) {
-                    misVidas = Math.max(0, misVidas - 1);
-                    actualizarVidas();
-                    if (misVidas <= 0) {
-                        finDelJuego('💀 PERDISTE 💀');
+            
+            peer.on('open', (id) => {
+                miPeerId = id;
+                document.getElementById('estado-conexion').innerHTML = "📡 Conectando con rival...";
+                
+                // Guardar mi Peer ID en Firebase
+                partidaRef.child('webrtc/' + miId).set(id);
+                
+                // Esperar Peer ID del rival
+                partidaRef.child('webrtc/' + rivalId).on('value', (snapshot) => {
+                    const rivalPeerId = snapshot.val();
+                    if (rivalPeerId && !conn) {
+                        // Conectar con el rival
+                        conn = peer.connect(rivalPeerId);
+                        
+                        conn.on('open', () => {
+                            document.getElementById('estado-conexion').innerHTML = "✅ Conexión directa!";
+                            
+                            // Enviar mi posición inicial
+                            conn.send({
+                                tipo: 'movimiento',
+                                posicion: miPosicion
+                            });
+                        });
+                        
+                        conn.on('data', recibirDatosWebRTC);
+                        
+                        conn.on('error', (err) => {
+                            document.getElementById('estado-conexion').innerHTML = "⚠️ Error en conexión";
+                        });
                     }
-                } else if (d.recibe === rivalId) {
-                    rivalVidas = Math.max(0, rivalVidas - 1);
-                    actualizarVidas();
-                    if (rivalVidas <= 0) {
-                        finDelJuego('🏆 ¡GANASTE! 🏆');
-                    }
-                }
+                });
             });
+            
+            peer.on('connection', (incomingConn) => {
+                conn = incomingConn;
+                document.getElementById('estado-conexion').innerHTML = "✅ Conexión directa!";
+                
+                conn.on('data', recibirDatosWebRTC);
+                
+                // Enviar mi posición
+                conn.send({
+                    tipo: 'movimiento',
+                    posicion: miPosicion
+                });
+            });
+            
+            peer.on('error', (err) => {
+                document.getElementById('estado-conexion').innerHTML = "❌ Error WebRTC, usando Firebase";
+                // Fallback a Firebase si WebRTC falla
+                usarFirebaseFallback();
+            });
+        }
 
-            // Escuchar posición del rival (solo para el marcador)
-            partidaRef.child('posicion').on('value', (snapshot) => {
-                const pos = snapshot.val();
-                if (pos && pos.jugador === rivalId) {
-                    document.getElementById('rival-marcador').style.left = pos.posicion + '%';
-                }
-            });
+        function recibirDatosWebRTC(data) {
+            if (!juegoActivo) return;
+            
+            switch(data.tipo) {
+                case 'movimiento':
+                    document.getElementById('rival-marcador').style.left = data.posicion + '%';
+                    break;
+                    
+                case 'disparo':
+                    crearFlechaEnemiga(data.posicion, data.id);
+                    break;
+                    
+                case 'danio':
+                    if (data.recibe === miId) {
+                        misVidas = Math.max(0, misVidas - 1);
+                        actualizarVidas();
+                        if (misVidas <= 0) finDelJuego('💀 PERDISTE 💀');
+                    }
+                    break;
+            }
         }
 
         // ========== MOVIMIENTO ==========
@@ -346,15 +406,16 @@
         function actualizarPosicion() {
             document.getElementById('mi-jugador').style.left = miPosicion + '%';
             
-            // Enviar posición a Firebase
-            partidaRef.child('posicion').set({
-                jugador: miId,
-                posicion: miPosicion,
-                timestamp: Date.now()
-            });
+            // Enviar por WebRTC
+            if (conn && conn.open) {
+                conn.send({
+                    tipo: 'movimiento',
+                    posicion: miPosicion
+                });
+            }
         }
 
-        // ========== SISTEMA DE FLECHAS ==========
+        // ========== DISPAROS ==========
         document.getElementById('btnDisparar').addEventListener('click', disparar);
         document.getElementById('btnDisparar').addEventListener('touchstart', (e) => {
             e.preventDefault();
@@ -371,19 +432,19 @@
             flechasDisponibles--;
             actualizarInterfazFlechas();
             
-            // ID único para esta flecha
             const flechaId = Date.now() + '-' + Math.random();
             
             // Crear flecha visual
             crearFlechaPropia(miPosicion, flechaId);
             
-            // Notificar a Firebase
-            partidaRef.child('disparos').push({
-                jugador: miId,
-                posicion: miPosicion,
-                id: flechaId,
-                timestamp: Date.now()
-            });
+            // Enviar por WebRTC
+            if (conn && conn.open) {
+                conn.send({
+                    tipo: 'disparo',
+                    posicion: miPosicion,
+                    id: flechaId
+                });
+            }
         }
 
         function crearFlechaPropia(posicion, id) {
@@ -399,10 +460,17 @@
                 y += 8;
                 flecha.style.bottom = y + 'px';
                 
-                // Verificar colisión con obstáculos
-                verificarColisionFlecha(flecha, id, true);
+                // Si llega a zona rival
+                if (y > 250 && y < 300) {
+                    // Notificar posible daño (simplificado)
+                    if (conn && conn.open) {
+                        conn.send({
+                            tipo: 'danio',
+                            recibe: rivalId
+                        });
+                    }
+                }
                 
-                // Si sale del campo
                 if (y > 500) {
                     clearInterval(intervalo);
                     flecha.remove();
@@ -433,14 +501,11 @@
                         rectFlecha.top < rectJugador.bottom &&
                         rectFlecha.bottom > rectJugador.top) {
                         
-                        // Me dieron!
                         clearInterval(intervalo);
                         flecha.remove();
-                        partidaRef.child('danio').push({
-                            recibe: miId,
-                            de: rivalId,
-                            timestamp: Date.now()
-                        });
+                        misVidas--;
+                        actualizarVidas();
+                        if (misVidas <= 0) finDelJuego('💀 PERDISTE 💀');
                     }
                 }
                 
@@ -451,11 +516,7 @@
             }, 30);
         }
 
-        function verificarColisionFlecha(flecha, id, esMia) {
-            // Por ahora solo con obstáculos
-            // La lógica de daño al rival se haría si la flecha llega a la zona rival
-        }
-
+        // ========== RECARGA ==========
         function iniciarRecarga() {
             setInterval(() => {
                 if (juegoActivo && flechasDisponibles < MAX_FLECHAS) {
@@ -477,21 +538,21 @@
         }
 
         // ========== OBSTÁCULOS ==========
+        let obstaculos = [];
+        const MAX_OBSTACULOS = 5;
+
         function iniciarObstaculos() {
-            // Crear obstáculos cada cierto tiempo
             setInterval(() => {
                 if (!juegoActivo) return;
                 
-                // Limpiar obstáculos viejos
                 obstaculos = obstaculos.filter(obs => {
-                    if (Date.now() - obs.tiempo > 5000) { // 5 segundos de vida
+                    if (Date.now() - obs.tiempo > 5000) {
                         document.getElementById(obs.id)?.remove();
                         return false;
                     }
                     return true;
                 });
                 
-                // Crear nuevo obstáculo si hay espacio
                 if (obstaculos.length < MAX_OBSTACULOS) {
                     crearObstaculo();
                 }
@@ -500,8 +561,8 @@
 
         function crearObstaculo() {
             const id = 'obs-' + Date.now() + '-' + Math.random();
-            const x = 10 + Math.random() * 80; // 10% a 90%
-            const y = 20 + Math.random() * 60; // 20% a 80% (para que esté en medio)
+            const x = 10 + Math.random() * 80;
+            const y = 20 + Math.random() * 60;
             
             const obstaculo = document.createElement('div');
             obstaculo.className = 'obstaculo';
@@ -515,6 +576,24 @@
                 x: x,
                 y: y,
                 tiempo: Date.now()
+            });
+        }
+
+        // ========== FALLBACK ==========
+        function usarFirebaseFallback() {
+            // Escuchar movimientos por Firebase si WebRTC falla
+            partidaRef.child('posicion').on('value', (snapshot) => {
+                const pos = snapshot.val();
+                if (pos && pos.jugador === rivalId) {
+                    document.getElementById('rival-marcador').style.left = pos.posicion + '%';
+                }
+            });
+            
+            partidaRef.child('disparos').on('child_added', (snapshot) => {
+                const disparo = snapshot.val();
+                if (disparo.jugador === rivalId) {
+                    crearFlechaEnemiga(disparo.posicion, disparo.id);
+                }
             });
         }
 
@@ -539,7 +618,7 @@
             }, 3000);
         }
 
-        // Posición inicial
+        // Inicializar posición
         window.onload = () => {
             document.getElementById('mi-jugador').style.left = '50%';
             document.getElementById('rival-marcador').style.left = '50%';
